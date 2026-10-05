@@ -150,6 +150,10 @@ table.free td:nth-child(2) small{display:block;color:var(--muted);font-size:13px
 .pairs button{flex:1 1 0;min-width:0;height:40px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0 8px}
 .pairs button[aria-pressed="true"]{background:var(--btn-bg);color:var(--btn-fg);border-color:var(--btn-bg)}
 .pairs em{flex:1 1 0;font-style:normal;color:var(--muted);font-size:14px;text-align:center}
+textarea{width:100%;min-height:150px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg);color:var(--ink);padding:12px 14px;font:inherit;font-size:16px;resize:vertical}
+.plist .acts{display:flex;gap:6px;flex:0 0 auto}
+.plist .x2{width:40px;height:40px;border:1.5px solid var(--border);border-radius:10px;background:var(--surface);font-size:20px;line-height:1;color:var(--muted)}
+.sheet .plist{background:var(--bg)}
 /* setup */
 .field{margin:18px 0 0;border:0;padding:0;min-width:0}
 .field>label,.field>legend{display:block;font-weight:600;font-size:15px;margin:0 0 8px;padding:0}
@@ -245,7 +249,7 @@ function inRoster(nm){for(var i=0;i<roster.length;i++)if(sameName(roster[i],nm))
   store.set(LSS,done);store.set(LSR,roster);
 })();
 draft.players=draft.players.filter(function(nm){return roster.indexOf(nm)>=0});
-var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"avg",confirmDel:null,player:null,pmsg:"",perr:"",swap:null};
+var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"avg",confirmDel:null,player:null,pmsg:"",perr:"",swap:null,paste:null};
 var hasHost=!!(window.claude&&typeof window.claude.use==="function");
 /* Online database (Firebase). Used when the app runs on its own site. */
 var FIREBASE={
@@ -667,7 +671,7 @@ function loadScript(src){
   });
 }
 function softRender(){
-  var keep=["#p-name","#late-name","#late-pair"].map(function(id){
+  var keep=["#p-name","#late-name","#late-pair","#paste-text","#reclub-link"].map(function(id){
     var el=$(id);return{id:id,val:el?el.value:"",had:!!el&&document.activeElement===el};
   });
   render();
@@ -855,6 +859,7 @@ function viewSetup(){
   +'<div class="field"><label for="p-name">Players</label><div class="add">'
     +'<input type="text" id="p-name" maxlength="24" placeholder="Name, or several separated by commas" autocomplete="off">'
     +'<button type="button" class="btn" data-act="add-player">Add player</button></div>'
+    +'<button type="button" class="btn small" style="margin-top:8px" data-act="paste-open">'+(hasHost?"Paste a list":"Get players from Reclub or a list")+'</button>'
     +(ui.err?'<p class="error" role="alert">'+esc(ui.err)+'</p>':'')
     +(roster.length?'<ul class="chips">'+roster.map(function(p,i){
         var on=draft.players.indexOf(p)>=0;
@@ -1163,6 +1168,178 @@ function dropHistory(id){
   }
 }
 
+/* ---------- paste a list of names (from Reclub, WhatsApp, anywhere) ---------- */
+var STOP=/^(daftar tunggu|waitlist|waiting list|wait list|cadangan|diundang|invited|reserve|reserves)\b/i;
+var HEAD=/^(dikonfirmasi|confirmed|going|peserta|participants|players|pemain|list|hadir)\b/i;
+var EMOJI=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{20E3}]/u;
+var EMOJI_ALL=/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{20E3}\u{FE0F}]/gu;
+var MAYBE=/\s+(tentative|tentatif|tbc|tba|maybe|mungkin|nyusul|menyusul|telat|late|waiting|confirm\w*|konfirmasi)\b.*$/i;
+/* one line of a list -> the player's name, any note written after it, and whether it is a "+" guest */
+function cleanName(line){
+  var note=[],x=String(line)
+    .replace(/[\u200B-\u200F\u2060-\u2064\uFEFF\u00AD]/g,"")
+    .replace(/^\s*[-•*·>]+\s*/,"")
+    .replace(/^\s*\(?\d{1,3}\s*[.):\-]?\s+/,"")
+    .replace(/^\s*\d{1,3}[.)]\s*/,"")
+    .replace(/^@/,"");
+  /* a status emoji after the name starts a note: "vanessa 🔴 tentative" */
+  var lead=x.replace(/^[\s\u{FE0F}]+/u,""),em=EMOJI.exec(lead);
+  while(em&&em.index===0){lead=lead.slice(em[0].length).replace(/^[\s\u{FE0F}]+/u,"");em=EMOJI.exec(lead)}
+  x=lead;
+  if(em){note.push(x.slice(em.index));x=x.slice(0,em.index)}
+  x=x.replace(/\(([^)]*)\)|\[([^\]]*)\]/g,function(_,p1,p2){note.push(p1||p2||"");return " "});
+  x=x.replace(/\s[-–—:|]\s(.*)$/,function(_,r){note.push(r);return ""});
+  x=x.replace(MAYBE,function(m){note.push(m);return ""});
+  var guest=false;
+  x=x.replace(/\s*\+\s*\d*\s*$/,function(){guest=true;return ""});
+  return{
+    name:x.replace(/\s+/g," ").trim(),
+    note:note.join(" ").replace(EMOJI_ALL," ").replace(/\s+/g," ").trim().slice(0,40),
+    guest:guest
+  };
+}
+/* a whole Reclub meet page pasted in: the players are the lines after "Confirmed · 13" / "Dikonfirmasi · 13" */
+var CONF=/^(dikonfirmasi|confirmed|going)\s*[·•:\-(]?\s*(\d{1,3})\b/i;
+var CONF_BARE=/^(dikonfirmasi|confirmed|going)\s*[·•:]?$/i;
+function hasConfirmed(text){
+  return String(text||"").split(/[\n\r]+/).some(function(l){l=l.trim();return CONF.test(l)||CONF_BARE.test(l)});
+}
+/* where the Reclub link reader lives; it only exists when the site is served by Vercel */
+var RECLUB_HELPER="/api/reclub";
+function reclubGet(){
+  var p=ui.paste;if(!p||p.busy)return;
+  var box=$("#reclub-link"),link=(box?box.value:"").trim();
+  p.link=link;p.err="";
+  var m=/reclub\.co\/(?:[a-z]{2}(?:-[A-Za-z]{2})?\/)?m\/([A-Za-z0-9_-]{3,24})/.exec(link);
+  if(!m){p.err="That doesn't look like a Reclub meet link. It should look like reclub.co/m/ABC123.";render();return}
+  p.busy=true;render();
+  var done=function(err,text){
+    if(ui.paste!==p)return;
+    p.busy=false;
+    if(!err){
+      var items=hasConfirmed(text)?readPaste(text):[];
+      if(items.length){p.items=items;p.when=meetTime(text);p.text="";render();return}
+      err="The meet page opened, but no confirmed players could be read from it. Paste the list instead.";
+    }
+    p.err=err;render();
+  };
+  fetch(RECLUB_HELPER+"?url="+encodeURIComponent("https://reclub.co/m/"+m[1])).then(function(r){
+    return r.json().then(function(d){return{status:r.status,d:d}},function(){return{status:r.status,d:null}});
+  }).then(function(x){
+    if(x.d&&x.d.ok)return done(null,x.d.text);
+    if(x.status===404||!x.d)return done("The Reclub link reader isn't set up on this address. Open Padelito from its Vercel address, or paste the list instead.");
+    done("Reclub didn't return the meet page ("+(x.d.error||x.status)+"). Check the link, or paste the list instead.");
+  }).catch(function(){done("Couldn't reach the link reader. Check your connection, or paste the list instead.")});
+}
+function meetTime(text){
+  var m=null;
+  String(text||"").split(/[\n\r]+/).some(function(l){
+    l=l.trim();
+    if(l.length<=40&&/@\s*\d{1,2}[.:]\d{2}/.test(l)){m=l;return true}
+    return false;
+  });
+  return m;
+}
+function parseNames(text){
+  var limit=Infinity,all=String(text||"").split(/[\n\r]+/);
+  for(var c=0;c<all.length;c++){
+    var ln=all[c].trim(),hit=CONF.exec(ln);
+    if(hit){limit=Number(hit[2]);text=all.slice(c+1).join("\n");break}
+    if(CONF_BARE.test(ln)){
+      var skip=c+1,nx=(all[skip]||"").trim();
+      if(/^[·•:]$/.test(nx)){skip++;nx=(all[skip]||"").trim()}
+      var cnt=/^[·•:]?\s*(\d{1,3})$/.exec(nx);
+      if(cnt){limit=Number(cnt[1]);skip++}
+      text=all.slice(skip).join("\n");break;
+    }
+  }
+  var out=[],seen={},guests={},lines=String(text||"").split(/[\n\r,;]+/);
+  /* in a numbered list, lines without a number are titles or notes, not players */
+  var NUM=/^\s*\(?\d{1,3}\s*[.):\-]?\s*\S/,filled=lines.filter(function(l){return l.trim()}).length;
+  var numbered=lines.filter(function(l){return NUM.test(l)}).length>=Math.max(2,filled/2);
+  for(var i=0;i<lines.length;i++){
+    var raw=lines[i].trim();
+    if(!raw)continue;
+    if(numbered&&!NUM.test(raw)&&!STOP.test(raw.replace(/^[^A-Za-z\u00C0-\uFFFF]+/,"")))continue;
+    var plain=raw.replace(/^[^A-Za-z\u00C0-\uFFFF]+/,"");
+    if(STOP.test(plain))break;
+    if(HEAD.test(plain)&&/[·:\d]|^\S+$/.test(plain))continue;
+    if(/https?:|^\/|www\./i.test(raw))continue;
+    var cn=cleanName(raw),nm=cn.name;
+    if(!nm||!/[A-Za-z\u00C0-\uFFFF]/.test(nm)||nm.length>30)continue;
+    nm=nm.slice(0,cn.guest?20:24).trim();
+    if(cn.guest){
+      /* "fil +" is a guest fil is bringing: number them fil +1, fil +2 */
+      /* "Darwin +1" with no separate line for Darwin means Darwin and a guest */
+      if(!seen[nm.toLowerCase()]){seen[nm.toLowerCase()]=1;out.push({name:nm,note:"",guest:false})}
+      var gk="+"+nm.toLowerCase();
+      guests[gk]=(guests[gk]||0)+1;
+      nm=nm+" +"+guests[gk];
+    }
+    var k=nm.toLowerCase();
+    if(seen[k])continue;
+    seen[k]=1;out.push({name:nm,note:cn.note,guest:cn.guest});
+    if(out.length>=limit)break;
+  }
+  return out;
+}
+function keyName(n){return n.toLowerCase().replace(/[^a-z0-9\u00C0-\uFFFF ]/g," ").replace(/\s+/g," ").trim()}
+/* find the saved player a pasted name most likely refers to */
+function matchSaved(nm,taken){
+  var k=keyName(nm),first=k.split(" ")[0],exact=null,close=[];
+  roster.forEach(function(r){
+    if(taken[r])return;
+    var rk=keyName(r),rf=rk.split(" ")[0];
+    if(rk===k)exact=r;
+    else if((first.length>=3&&rf===first)||(k.length>=3&&rk.indexOf(k+" ")===0)||(rk.length>=3&&k.indexOf(rk+" ")===0))close.push(r);
+  });
+  if(exact)return{name:exact,exact:true};
+  if(close.length===1)return{name:close[0],exact:false};
+  return null;
+}
+function readPaste(text){
+  var taken={};
+  return parseNames(text).map(function(e){
+    var m=e.guest?null:matchSaved(e.name,taken);
+    if(m)taken[m.name]=1;
+    return{name:e.name,note:e.note,guest:e.guest,match:m?m.name:null,exact:!!(m&&m.exact),use:!!m};
+  });
+}
+function viewPaste(){
+  var p=ui.paste;if(!p)return"";
+  var html='<div class="scrim" data-act="paste-close"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="paste-title">';
+  if(!p.items){
+    html+='<h2 id="paste-title">Bring in a list of players</h2>'
+      +(hasHost?'':'<label for="reclub-link" style="display:block;font-weight:600;font-size:15px;margin:0 0 8px">Reclub meet link</label>'
+        +'<div class="add"><input type="text" id="reclub-link" inputmode="url" autocomplete="off" placeholder="reclub.co/m/…" value="'+esc(p.link||"")+'">'
+        +'<button type="button" class="btn primary" data-act="reclub-get"'+(p.busy?" disabled":"")+'>'+(p.busy?"Reading…":"Get players")+'</button></div>'
+        +'<p class="hint" style="margin-bottom:16px">Reads the confirmed players and the meet time from the public meet page.</p>'
+        +'<span style="display:block;font-weight:600;font-size:15px;margin:0 0 8px">Or paste a list</span>')
+      +'<p class="hint" style="margin-top:0;margin-bottom:12px">Paste names here, one per line or separated by commas. Numbering, emojis and anything after a waitlist heading are ignored.</p>'
+      +'<p class="hint" style="margin-top:0;margin-bottom:12px">From Reclub: open the meet link in your browser, choose Select all, copy, and paste the whole page here. Only the confirmed players are picked out.</p>'
+      +'<textarea id="paste-text" placeholder="1. Arwin&#10;2. Vanessa&#10;3. Otto"></textarea>'
+      +(p.err?'<p class="error" role="alert">'+esc(p.err)+'</p>':'')
+      +'<div class="row" style="margin-top:14px"><button type="button" class="btn" data-act="paste-close">Cancel</button>'
+      +'<button type="button" class="btn primary" data-act="paste-read">Read the list</button></div>';
+  }else{
+    var n=p.items.length;
+    html+='<h2 id="paste-title">'+n+(n===1?" player":" players")+' found</h2>'
+      +'<p class="hint" style="margin-top:0;margin-bottom:12px">Check the names. Where one looks like a saved player it is matched, so their history stays together.</p>'
+      +'<ul class="plist">'+p.items.map(function(it,i){
+        var note=it.guest?"guest":it.match&&it.use?(it.exact?"saved player":"counted as "+it.match):"new player";
+        if(it.note)note+=", note: "+it.note;
+        return '<li><span>'+esc(it.name)+'<small>'+esc(note)+'</small></span><span class="acts">'
+          +(it.match&&!it.exact?'<button type="button" class="btn small" data-act="paste-toggle" data-i="'+i+'">'+(it.use?"Make new":"Use "+esc(it.match))+'</button>':'')
+          +'<button type="button" class="x2" data-act="paste-drop" data-i="'+i+'" aria-label="Leave out '+esc(it.name)+'">×</button></span></li>';
+      }).join("")+'</ul>'
+      +'<p class="hint" style="margin-top:0;margin-bottom:14px">This replaces whoever is selected for today.'
+      +(p.when&&!(draft.name||"").trim()?' The meet time, '+esc(p.when)+', becomes the tournament name.':'')+'</p>'
+      +'<div class="row"><button type="button" class="btn" data-act="paste-back">Back</button>'
+      +'<button type="button" class="btn primary" data-act="paste-apply"'+(n?"":" disabled")+'>Select '+(n===1?"this player":"these "+n+" players")+'</button></div>';
+  }
+  return html+'</div>';
+}
+
 function viewSheet(){
   var s=ui.sheet;if(!s||!T)return"";
   var r=T.rounds[s.r],m=r&&r.matches[s.m];if(!m)return"";
@@ -1216,7 +1393,7 @@ function render(){
       return '<button type="button" data-act="tab" data-t="'+t[0]+'"'+(ui.tab===t[0]?' aria-current="page"':"")+'>'+t[1]+'</button>';
     }).join("")+"</div>";
   }
-  $("#sheet").innerHTML=viewSheet();
+  $("#sheet").innerHTML=viewSheet()||(T?"":viewPaste());
 }
 
 /* ---------- actions ---------- */
@@ -1315,6 +1492,32 @@ document.addEventListener("click",function(e){
           who.out=true;
         }else{who.out=false;levelRests(T,who)}
         lineupChanged();
+      }break;
+    case "paste-open":ui.paste={items:null,text:"",err:"",link:"",busy:false};render();break;
+    case "paste-close":ui.paste=null;render();break;
+    case "reclub-get":reclubGet();break;
+    case "paste-read":
+      if(ui.paste){
+        var box=$("#paste-text"),txtv=box?box.value:"",items=readPaste(txtv);
+        ui.paste.text=txtv;
+        if(!items.length){ui.paste.err="No names found. Paste one name per line, or separate them with commas.";render();var b2=$("#paste-text");if(b2)b2.value=txtv}
+        else{ui.paste.items=items;ui.paste.when=meetTime(txtv);ui.paste.err="";render()}
+      }break;
+    case "paste-back":if(ui.paste){var keepT=ui.paste.text;ui.paste.items=null;render();var b3=$("#paste-text");if(b3)b3.value=keepT}break;
+    case "paste-toggle":if(ui.paste&&ui.paste.items){var pit=ui.paste.items[Number(el.dataset.i)];if(pit){pit.use=!pit.use;render()}}break;
+    case "paste-drop":if(ui.paste&&ui.paste.items){ui.paste.items.splice(Number(el.dataset.i),1);render()}break;
+    case "paste-apply":
+      if(ui.paste&&ui.paste.items&&ui.paste.items.length){
+        var picked=[],grew=false;
+        ui.paste.items.slice(0,40).forEach(function(it){
+          var nmx=it.match&&it.use?it.match:(inRoster(it.name)||it.name);
+          if(!inRoster(nmx)){if(roster.length>=60)return;roster.push(nmx);grew=true}
+          if(picked.indexOf(nmx)<0)picked.push(nmx);
+        });
+        if(ui.paste.when&&!(draft.name||"").trim())draft.name=ui.paste.when.slice(0,40);
+        draft.players=picked;ui.paste=null;ui.swap=null;ui.err="";
+        if(grew)saveRoster();
+        saveDraft();render();
       }break;
     case "shuffle-pairs":draft.players=shuffle(draft.players);ui.swap=null;saveDraft();render();break;
     case "swap-pick":
@@ -1418,8 +1621,10 @@ document.addEventListener("input",function(e){
 document.addEventListener("keydown",function(e){
   if(e.key==="Enter"&&e.target.id==="p-name"){e.preventDefault();addPlayers()}
   if(e.key==="Enter"&&e.target.id==="late-name"){e.preventDefault();addLate(e.target.value)}
+  if(e.key==="Enter"&&e.target.id==="reclub-link"){e.preventDefault();reclubGet()}
   if(e.key==="Enter"&&e.target.id==="late-pair"){e.preventDefault();addLatePair(e.target.value)}
   if(e.key==="Escape"&&ui.sheet){ui.sheet=null;render()}
+  else if(e.key==="Escape"&&ui.paste){ui.paste=null;render()}
 });
 
 ui.round=firstOpenRound();
