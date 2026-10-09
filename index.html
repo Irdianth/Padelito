@@ -247,7 +247,7 @@ var draft=Object.assign({name:"",format:"americano",mode:"first",n:6,deuce:"gold
 if(!Array.isArray(draft.players))draft.players=[];
 if(["first","best","total","set"].indexOf(draft.mode)<0)draft.mode="first";
 if([4,5,6].indexOf(draft.n)<0)draft.n=6;
-if(draft.rank!=="wins")draft.rank="games";
+if(draft.rank!=="games")draft.rank="wins";
 /* Usual players. Names listed here are added to the saved list the first time the app opens in a browser. */
 var REGULARS=["Puwi","Rinto","Jimmy","Otto","Erik","Brian","Arwin","Vanessa","Erwin","Darwin"];
 var LSR="padel.roster.v1", LSH="padel.history.v1", LSS="padel.seeded.v1";
@@ -263,7 +263,7 @@ function inRoster(nm){for(var i=0;i<roster.length;i++)if(sameName(roster[i],nm))
   store.set(LSS,done);store.set(LSR,roster);
 })();
 draft.players=draft.players.filter(function(nm){return roster.indexOf(nm)>=0});
-var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"avg",confirmDel:null,player:null,pmsg:"",perr:"",swap:null,paste:null,ren:null,big:null,undo:null};
+var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"win",confirmDel:null,player:null,pmsg:"",perr:"",swap:null,paste:null,ren:null,big:null,undo:null};
 var hasHost=!!(window.claude&&typeof window.claude.use==="function");
 /* Online database (Firebase). Used when the app runs on its own site. */
 var FIREBASE={
@@ -1013,7 +1013,7 @@ function viewStandings(){
       +'<p class="champ-s">'+(c.scaled?adjOf(c)+' adjusted, ':'')+c.pts+' games won, '+c.w+(c.w===1?" win":" wins")+' from '+c.played+(c.played===1?" match":" matches")+'</p></div>';
   }
   if(!any)html+='<p class="hint" style="margin:0 0 12px">No scores yet. The table counts games won and updates as they are played.</p>';
-  html+='<div class="table-scroll"><table><thead><tr><th>#</th><th>'+(fixed?"Pair":"Player")+'</th><th>Played</th><th>W–T–L</th><th>Diff</th><th>Games</th>'+(norm?'<th>Adjusted</th>':'')+'</tr></thead><tbody>'
+  html+='<div class="table-scroll"><table><thead><tr><th>#</th><th>'+(fixed?"Pair":"Player")+'</th><th>Played</th><th>W–T–L</th><th>Diff</th><th>Games won</th>'+(norm?'<th>Adjusted</th>':'')+'</tr></thead><tbody>'
     +rows.map(function(p,i){
       return '<tr class="'+(i===0&&any?"lead":"")+'"><td>'+(i+1)+'</td><td class="name">'+esc(p.name)+(gone[p.id]?'<span class="tag">left</span>':'')+'</td><td>'+p.played+'</td><td>'
         +p.w+'–'+p.t+'–'+p.l+'</td><td>'+(p.diff>0?"+":"")+p.diff+'</td>'
@@ -1021,7 +1021,7 @@ function viewStandings(){
     }).join("")+'</tbody></table></div>';
   if(norm)html+='<p class="hint">Adjusted scales each '+(fixed?"pair":"player")+"'s "+(byWins?"wins":"games")+' to '+rows[0].normTo+' matches, the most anyone has played, so totals compare fairly. '
     +'Anyone who left early, or played fewer than three quarters of that, keeps their score as played. You can turn this off on the Tournament tab.</p>';
-  html+='<p class="hint">Games is the total number of games won across all matches, and Diff is games won minus games lost. Ranked by '+(norm?"adjusted ":"")+(T.rank==="wins"?"matches won, then games won":"games won, then game difference")+'. Change this on the Tournament tab.</p>';
+  html+='<p class="hint">Games won is the total across all matches, and Diff is games won minus games lost. Ranked by '+(norm?"adjusted ":"")+(T.rank==="wins"?"matches won, then games won":"games won, then game difference")+'. Change this on the Tournament tab.</p>';
   if(T.finished&&any)html+='<div class="row" style="margin-top:12px">'+shareButtons("cur")+'</div>';
   if(!norm&&rows.some(function(p){return p.played!==rows[0].played}))html+='<p class="hint">Not everyone has played the same number of matches, so compare the Played column before calling a winner.</p>';
   return html;
@@ -1127,7 +1127,8 @@ function allTime(){
   })});
   var list=Object.keys(map).map(function(k){var p=map[k];p.avg=p.played?p.pts/p.played:0;p.win=p.played?p.w/p.played:0;return p});
   var key=ui.hsort;
-  return list.sort(function(x,y){return y[key]-x[key]||y.pts-x.pts||y.diff-x.diff||x.name.localeCompare(y.name)});
+  /* ties go to the better win rate, then games per match, then game difference */
+  return list.sort(function(x,y){return y[key]-x[key]||y.win-x.win||y.avg-x.avg||y.diff-x.diff||y.pts-x.pts||x.name.localeCompare(y.name)});
 }
 function ordinal(n){var v=n%100;if(v>10&&v<14)return n+"th";return n+(["th","st","nd","rd"][n%10]||"th")}
 function bump(map,n,gf,ga){
@@ -1160,7 +1161,7 @@ function playerSummary(name){
 function pairTable(map,label){
   var list=Object.keys(map).map(function(k){return map[k]}).sort(function(x,y){
     return y.w/y.played-x.w/x.played||y.played-x.played||(y.gf-y.ga)-(x.gf-x.ga)||x.name.localeCompare(y.name)});
-  return '<div class="table-scroll"><table><thead><tr><th>#</th><th>'+label+'</th><th>Matches</th><th>W–T–L</th><th>Games</th></tr></thead><tbody>'
+  return '<div class="table-scroll"><table><thead><tr><th>#</th><th>'+label+'</th><th>Matches</th><th>W–T–L</th><th>Games won–lost</th></tr></thead><tbody>'
     +list.map(function(o,i){
       return '<tr><td>'+(i+1)+'</td><td class="name">'+esc(o.name)+'</td><td>'+o.played+'</td><td>'+o.w+'–'+o.t+'–'+o.l+'</td><td>'+o.gf+'–'+o.ga+'</td></tr>';
     }).join("")+'</tbody></table></div>';
@@ -1175,14 +1176,14 @@ function viewPlayer(name){
     +stat(p.played,"Matches")+stat(p.w+'–'+p.t+'–'+p.l,"W–T–L")+stat((p.played?Math.round(p.w/p.played*100):0)+'%',"Win rate")
     +stat(p.pts,"Games won")+stat((p.diff>0?"+":"")+p.diff,"Game diff")+stat(p.played?(p.pts/p.played).toFixed(1):"0.0","Per match")
     +'</div>';
-  html+='<h2>Tournament by tournament</h2><div class="table-scroll"><table class="free"><thead><tr><th>Finish</th><th>Tournament</th><th>W–T–L</th><th>Diff</th><th>Games</th></tr></thead><tbody>'
+  html+='<h2>Tournament by tournament</h2><div class="table-scroll"><table class="free"><thead><tr><th>Finish</th><th>Tournament</th><th>W–T–L</th><th>Diff</th><th>Games won</th></tr></thead><tbody>'
     +p.nights.slice().reverse().map(function(n){
       return '<tr><td>'+ordinal(n.pos)+' of '+n.of+'</td><td>'+esc(n.rec.name)+'<small>'+esc(fmtDate(n.rec.date))+'</small></td><td>'
         +n.row.w+'–'+n.row.t+'–'+n.row.l+'</td><td>'+(n.row.diff>0?"+":"")+n.row.diff+'</td><td class="pts">'+n.row.pts+'</td></tr>';
     }).join("")+'</tbody></table></div>';
   if(p.hasMatches){
     html+='<h2>With each partner</h2>'+pairTable(p.partners,"Partner")
-      +'<p class="hint">Best partnership first. Games shows games won and lost together.</p>'
+      +'<p class="hint">Best partnership first. The last column is games won and lost together.</p>'
       +'<h2>Against each opponent</h2>'+pairTable(p.opps,"Opponent")
       +'<p class="hint">W–T–L is '+esc(p.name)+"'s record when this player was on the other side of the net.</p>";
   }else{
@@ -1199,13 +1200,13 @@ function viewHistory(){
   }
   var rows=allTime(),recent=hist.slice().reverse();
   html+='<div class="seg" style="margin-bottom:10px" aria-label="Sort players by">'
-    +hseg("avg","Games per match")+hseg("pts","Games won")+hseg("win","Win rate")+'</div>'
-    +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th><th>Titles</th><th>Matches</th><th>W–T–L</th><th>Win rate</th><th>Games</th><th>Per match</th></tr></thead><tbody>'
+    +hseg("win","Win rate")+hseg("avg","Games per match")+hseg("pts","Games won")+'</div>'
+    +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th><th>Titles</th><th>Matches</th><th>W–T–L</th><th>Win rate</th><th>Games won</th><th>Per match</th></tr></thead><tbody>'
     +rows.map(function(p,i){
       return '<tr class="'+(i===0?"lead":"")+'"><td>'+(i+1)+'</td><td class="name"><button type="button" class="plink" data-act="player" data-n="'+esc(p.name)+'">'+esc(p.name)+'</button></td><td>'+p.titles+'</td><td>'+p.played+'</td><td>'
         +p.w+'–'+p.t+'–'+p.l+'</td><td>'+Math.round(p.win*100)+'%</td><td>'+p.pts+'</td><td class="pts">'+p.avg.toFixed(1)+'</td></tr>';
     }).join("")+'</tbody></table></div>'
-    +'<p class="hint">Totals across '+hist.length+(hist.length===1?" finished tournament.":" finished tournaments.")+' Tap a name to see that player in detail. Games per match is the fairest comparison when people have played different numbers of matches.</p>';
+    +'<p class="hint">Totals across '+hist.length+(hist.length===1?" finished tournament.":" finished tournaments.")+' Tap a name to see that player in detail. Win rate is matches won as a share of matches played, so it stays fair when people have played different numbers of matches.</p>';
 
   if(hist.length>1){
     var cols=recent.slice(0,6);
@@ -1225,7 +1226,7 @@ function viewHistory(){
   recent.forEach(function(rec){
     var top=rec.rows[0];
     html+='<details class="past"><summary>'+esc(rec.name)+'<span>'+esc(fmtDate(rec.date))+', '+esc(rec.len)+(top?', won by '+esc(rec.winners?rec.winners.join(" & "):top.name):'')+'</span></summary>'
-      +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th><th>Played</th><th>W–T–L</th><th>Diff</th><th>Games</th>'+(rec.normTo?'<th>Adjusted</th>':'')+'</tr></thead><tbody>'
+      +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th><th>Played</th><th>W–T–L</th><th>Diff</th><th>Games won</th>'+(rec.normTo?'<th>Adjusted</th>':'')+'</tr></thead><tbody>'
       +rec.rows.map(function(r,i){
         return '<tr><td>'+(r.pos||i+1)+'</td><td class="name">'+esc(r.name)+'</td><td>'+r.played+'</td><td>'+r.w+'–'+r.t+'–'+r.l+'</td><td>'+(r.diff>0?"+":"")+r.diff+'</td>'
           +(rec.normTo?'<td>'+r.pts+'</td><td class="pts">'+(r.adj!=null?r.adj.toFixed(1):"–")+'</td>':'<td class="pts">'+r.pts+'</td>')+'</tr>';
