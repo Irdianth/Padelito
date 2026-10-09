@@ -105,7 +105,8 @@ table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
 th{font-size:13px;font-weight:500;color:var(--muted);text-align:right;padding:10px 8px 8px;white-space:nowrap}
 td{padding:11px 8px;text-align:right;border-top:1px solid var(--border);white-space:nowrap}
 th:first-child,td:first-child{padding-left:14px;text-align:left;width:36px;color:var(--muted)}
-th:nth-child(2),td:nth-child(2){text-align:left;white-space:normal;overflow-wrap:anywhere}
+th:nth-child(2),td:nth-child(2){text-align:left;white-space:normal;overflow-wrap:normal;word-break:normal;min-width:92px}
+.plink{white-space:nowrap}
 th:last-child,td:last-child{padding-right:14px}
 td.name{font-weight:600}
 td.pts{font-family:var(--display);font-weight:700;font-size:24px;line-height:1}
@@ -130,7 +131,7 @@ td.best{font-weight:700;color:var(--accent)}
 .back{background:none;border:0;padding:10px 0;margin-top:8px;color:var(--accent);font-weight:600}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 6px}
 .stats div{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px}
-.stats b{display:block;font-family:var(--display);font-weight:700;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
+.stats b{white-space:nowrap;display:block;font-family:var(--display);font-weight:700;font-size:28px;line-height:1.1;font-variant-numeric:tabular-nums}
 .stats span{font-size:13px;color:var(--muted)}
 table.free th:first-child,table.free td:first-child{width:auto;color:var(--ink);font-weight:600}
 table.free td:nth-child(2) small{display:block;color:var(--muted);font-size:13px;font-weight:400}
@@ -205,14 +206,15 @@ input[type=text]{width:100%;height:48px;border-radius:12px;border:1.5px solid va
 
 /* score sheet */
 .scrim{position:fixed;inset:0;background:rgba(6,12,32,.55);z-index:10}
-.sheet{position:fixed;left:0;right:0;bottom:0;z-index:11;background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:88%;overflow-y:auto;animation:up .18s ease-out}
+.sheet{position:fixed;left:0;right:0;bottom:0;z-index:11;background:var(--surface);border-radius:20px 20px 0 0;padding:20px 16px calc(18px + env(safe-area-inset-bottom,0px));max-height:88%;overflow-y:auto}
+.sheet.in{animation:up .18s ease-out}
 .sheet>*{max-width:528px;margin-left:auto;margin-right:auto}
 .sheet h2{margin-top:0;overflow-wrap:anywhere}
 .nums{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:14px;margin-bottom:16px}
 .nums button{height:52px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg);font-family:var(--display);font-weight:600;font-size:24px}
 .nums button[aria-pressed="true"]{background:var(--court);border-color:var(--court);color:#fff}
 @keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
-@media (prefers-reduced-motion:reduce){.sheet{animation:none}}
+@media (prefers-reduced-motion:reduce){.sheet.in{animation:none}}
 @media (max-width:360px){.score{font-size:50px;min-width:54px}.names span{font-size:15px;padding:0 8px}}
 [hidden]{display:none!important}
 </style>
@@ -253,6 +255,8 @@ var REGULARS=["Puwi","Rinto","Jimmy","Otto","Erik","Brian","Arwin","Vanessa","Er
 var LSR="padel.roster.v1", LSH="padel.history.v1", LSS="padel.seeded.v1";
 var roster=store.get(LSR);if(!Array.isArray(roster))roster=draft.players.slice();
 var hist=store.get(LSH);if(!Array.isArray(hist))hist=[];
+/* deleting only hides an entry; it stays in the database so the owner can restore it */
+function liveHist(){return hist.filter(function(r){return !r.deleted})}
 function sameName(a,b){return a.trim().toLowerCase()===b.trim().toLowerCase()}
 function inRoster(nm){for(var i=0;i<roster.length;i++)if(sameName(roster[i],nm))return roster[i];return null}
 (function seed(){
@@ -263,7 +267,7 @@ function inRoster(nm){for(var i=0;i<roster.length;i++)if(sameName(roster[i],nm))
   store.set(LSS,done);store.set(LSR,roster);
 })();
 draft.players=draft.players.filter(function(nm){return roster.indexOf(nm)>=0});
-var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"win",confirmDel:null,player:null,pmsg:"",perr:"",swap:null,paste:null,ren:null,big:null,undo:null};
+var ui={tab:"matches",round:0,sheet:null,confirmEnd:false,err:"",hsort:"win",confirmDel:null,player:null,pmsg:"",perr:"",swap:null,paste:null,ren:null,big:null,undo:null,pin:null};
 var hasHost=!!(window.claude&&typeof window.claude.use==="function");
 /* Online database (Firebase). Used when the app runs on its own site. */
 var FIREBASE={
@@ -720,7 +724,7 @@ function loadScript(src){
   });
 }
 function softRender(){
-  var keep=["#p-name","#late-name","#late-pair","#paste-text","#reclub-link","#ren-name","#sub-name"].map(function(id){
+  var keep=["#p-name","#late-name","#late-pair","#paste-text","#reclub-link","#ren-name","#sub-name","#pin-in"].map(function(id){
     var el=$(id);return{id:id,val:el?el.value:"",had:!!el&&document.activeElement===el};
   });
   render();
@@ -756,6 +760,13 @@ function initFirebase(){
     cloud.ref=db.collection("padelito").doc("tournament");
     cloud.rosterRef=db.collection("padelito").doc("roster");
     cloud.histRef=db.collection("padelito_history");
+    cloud.setRef=db.collection("padelito").doc("settings");
+    cloud.setRef.onSnapshot(function(snap){
+      if(snap.metadata.fromCache)return;
+      var d=snap.exists?snap.data():null;
+      settings=d&&d.pin?{pin:d.pin}:null;store.set(LSSET,settings);
+      if(ui.tab==="history")softRender();
+    },function(){});
 
     /* the running tournament */
     cloud.ref.onSnapshot(function(snap){
@@ -1119,7 +1130,7 @@ function isWinner(rec,r,i){
 }
 function allTime(){
   var map={};
-  hist.forEach(function(rec){rec.rows.forEach(function(r,i){
+  liveHist().forEach(function(rec){rec.rows.forEach(function(r,i){
     var k=r.name.trim().toLowerCase();
     var p=map[k]||(map[k]={name:r.name,events:0,titles:0,played:0,w:0,t:0,l:0,pts:0,diff:0});
     p.name=r.name;p.events++;if(isWinner(rec,r,i)&&r.played>0)p.titles++;
@@ -1139,7 +1150,7 @@ function bump(map,n,gf,ga){
 function playerSummary(name){
   var s={name:name,events:0,titles:0,played:0,w:0,t:0,l:0,pts:0,diff:0,best:null,finSum:0,nights:[],partners:{},opps:{},hasMatches:false};
   function me(n){return sameName(n,name)}
-  hist.forEach(function(rec){
+  liveHist().forEach(function(rec){
     var idx=-1;rec.rows.forEach(function(r,i){if(me(r.name))idx=i});
     if(idx<0)return;
     var r=rec.rows[idx];
@@ -1194,21 +1205,32 @@ function viewPlayer(name){
 function viewHistory(){
   if(ui.player)return viewPlayer(ui.player);
   var html='<h2>History</h2>';
-  if(!hist.length){
+  var LH=liveHist();
+  if(!LH.length){
     html+='<div class="empty" style="padding:36px 0"><strong>No finished tournaments yet</strong>After the last round, tap Finish tournament on the Matches tab. The results are kept here.</div>';
-    return html+backupButtons();
+    return html+ownerBox()+backupButtons();
   }
-  var rows=allTime(),recent=hist.slice().reverse();
+  var rows=allTime(),recent=LH.slice().reverse();
+  /* the column you sort by sits right after the name, so it is visible without scrolling sideways */
+  var cols=[
+    {k:"win",h:"Win rate",v:function(p){return Math.round(p.win*100)+"%"}},
+    {k:"avg",h:"Per match",v:function(p){return p.avg.toFixed(1)}},
+    {k:"pts",h:"Games won",v:function(p){return p.pts}},
+    {k:"",h:"W–T–L",v:function(p){return p.w+"–"+p.t+"–"+p.l}},
+    {k:"",h:"Matches",v:function(p){return p.played}},
+    {k:"",h:"Titles",v:function(p){return p.titles}}
+  ];
+  cols.sort(function(x,y){return (y.k===ui.hsort)-(x.k===ui.hsort)});
   html+='<div class="seg" style="margin-bottom:10px" aria-label="Sort players by">'
     +hseg("win","Win rate")+hseg("avg","Games per match")+hseg("pts","Games won")+'</div>'
-    +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th><th>Titles</th><th>Matches</th><th>W–T–L</th><th>Win rate</th><th>Games won</th><th>Per match</th></tr></thead><tbody>'
+    +'<div class="table-scroll"><table><thead><tr><th>#</th><th>Player</th>'+cols.map(function(c){return '<th>'+c.h+'</th>'}).join("")+'</tr></thead><tbody>'
     +rows.map(function(p,i){
-      return '<tr class="'+(i===0?"lead":"")+'"><td>'+(i+1)+'</td><td class="name"><button type="button" class="plink" data-act="player" data-n="'+esc(p.name)+'">'+esc(p.name)+'</button></td><td>'+p.titles+'</td><td>'+p.played+'</td><td>'
-        +p.w+'–'+p.t+'–'+p.l+'</td><td>'+Math.round(p.win*100)+'%</td><td>'+p.pts+'</td><td class="pts">'+p.avg.toFixed(1)+'</td></tr>';
+      return '<tr class="'+(i===0?"lead":"")+'"><td>'+(i+1)+'</td><td class="name"><button type="button" class="plink" data-act="player" data-n="'+esc(p.name)+'">'+esc(p.name)+'</button></td>'
+        +cols.map(function(c,ci){return '<td'+(ci===0?' class="pts"':'')+'>'+c.v(p)+'</td>'}).join("")+'</tr>';
     }).join("")+'</tbody></table></div>'
-    +'<p class="hint">Totals across '+hist.length+(hist.length===1?" finished tournament.":" finished tournaments.")+' Tap a name to see that player in detail. Win rate is matches won as a share of matches played, so it stays fair when people have played different numbers of matches.</p>';
+    +'<p class="hint">Totals across '+LH.length+(LH.length===1?" finished tournament.":" finished tournaments.")+' Tap a name to see that player in detail. Win rate is matches won as a share of matches played, so it stays fair when people have played different numbers of matches.</p>';
 
-  if(hist.length>1){
+  if(LH.length>1){
     var cols=recent.slice(0,6);
     html+='<h2>Games won, night by night</h2><div class="table-scroll"><table><thead><tr><th></th><th>Player</th>'
       +cols.map(function(r){return '<th>'+esc(shortDate(r.date))+'</th>'}).join("")+'</tr></thead><tbody>'
@@ -1232,14 +1254,82 @@ function viewHistory(){
           +(rec.normTo?'<td>'+r.pts+'</td><td class="pts">'+(r.adj!=null?r.adj.toFixed(1):"–")+'</td>':'<td class="pts">'+r.pts+'</td>')+'</tr>';
       }).join("")+'</tbody></table></div><div class="row">'
       +shareButtons(rec.id)
-      +(ui.confirmDel===rec.id
+      +(!isOwner()?'':ui.confirmDel===rec.id
         ?'<button type="button" class="btn" data-act="keep-rec">Keep it</button><button type="button" class="btn danger" data-act="del-rec" data-id="'+rec.id+'">Delete from history</button>'
         :'<button type="button" class="btn danger" data-act="ask-del" data-id="'+rec.id+'">Delete from history</button>')
       +'</div></details>';
   });
-  return html+backupButtons();
+  return html+ownerBox()+backupButtons();
 }
 function hseg(v,label){return '<button type="button" data-act="hsort" data-v="'+v+'" aria-pressed="'+(ui.hsort===v)+'">'+label+'</button>'}
+/* ---------- owner PIN: only the owner's devices can delete, restore or rename history ---------- */
+var LSO="padel.owner.v1",LSSET="padel.settings.v1";
+var settings=store.get(LSSET)||null;
+function pinSet(){return !!(settings&&settings.pin)}
+function isOwner(){
+  if(!useFb)return true;
+  return pinSet()&&store.get(LSO)===settings.pin;
+}
+function hashPin(pin){
+  var text="padelito:"+((FIREBASE&&FIREBASE.projectId)||"")+":"+pin;
+  if(typeof crypto!=="undefined"&&crypto.subtle&&typeof TextEncoder!=="undefined"){
+    return crypto.subtle.digest("SHA-256",new TextEncoder().encode(text)).then(function(buf){
+      return Array.prototype.map.call(new Uint8Array(buf),function(b){return ("0"+b.toString(16)).slice(-2)}).join("");
+    });
+  }
+  var h=5381;for(var i=0;i<text.length;i++)h=((h<<5)+h+text.charCodeAt(i))>>>0;
+  return Promise.resolve("x"+h.toString(16));
+}
+function pinSubmit(){
+  var p=ui.pin;if(!p||p.busy)return;
+  var box=$("#pin-in"),val=(box?box.value:"").trim();
+  p.err="";
+  if(!/^\d{4,8}$/.test(val)){p.err="Use 4 to 8 digits.";render();return}
+  p.busy=true;render();
+  hashPin(val).then(function(h){
+    if(ui.pin!==p)return;
+    if(p.mode==="enter"){
+      p.busy=false;
+      if(pinSet()&&h===settings.pin){store.set(LSO,h);ui.pin=null}else p.err="Wrong PIN.";
+      render();return;
+    }
+    if(!cloud.fb||!cloud.setRef){p.busy=false;p.err="No connection to the database yet. Try again in a moment.";render();return}
+    cloud.setRef.set({pin:h,at:new Date().toISOString()}).then(function(){
+      settings={pin:h};store.set(LSSET,settings);store.set(LSO,h);
+      if(ui.pin===p)ui.pin=null;
+      render();
+    }).catch(function(){
+      if(ui.pin!==p)return;
+      p.busy=false;p.err="The PIN could not be saved. Update the database rules in Firebase first, then try again.";render();
+    });
+  });
+}
+function ownerBox(){
+  if(!useFb||!cloud.canWrite)return"";
+  var html='<h2>Owner</h2>',p=ui.pin;
+  if(p){
+    return html+'<label for="pin-in" style="display:block;font-weight:600;font-size:15px;margin:0 0 8px">'+(p.mode==="set"?"Choose an owner PIN":"Owner PIN")+'</label>'
+      +'<div class="add"><input type="password" id="pin-in" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="off" placeholder="4 to 8 digits">'
+      +'<button type="button" class="btn primary" data-act="pin-go"'+(p.busy?" disabled":"")+'>'+(p.mode==="set"?"Save PIN":"Sign in")+'</button></div>'
+      +(p.err?'<p class="error" role="alert">'+esc(p.err)+'</p>':'')
+      +(p.mode==="set"?'<p class="hint">Set once, and it cannot be changed from the app. Remember it: you will need it on any new phone.</p>':'')
+      +'<button type="button" class="back" data-act="pin-cancel">Cancel</button>';
+  }
+  if(!pinSet())return html+'<p class="hint" style="margin:0 0 12px">No owner yet. Once a PIN is set, only devices signed in with it can delete, restore or rename history.</p>'
+    +'<button type="button" class="btn" data-act="pin-open" data-m="set">Set owner PIN</button>';
+  if(!isOwner())return html+'<p class="hint" style="margin:0 0 12px">Only the owner can delete, restore or rename history.</p>'
+    +'<button type="button" class="btn" data-act="pin-open" data-m="enter">Owner sign-in</button>';
+  var gone=hist.filter(function(r){return r.deleted}).reverse();
+  html+='<p class="hint" style="margin:0 0 12px">This device is signed in as owner.</p>';
+  if(gone.length){
+    html+='<p style="font-weight:600;font-size:15px;margin:0 0 8px">Deleted tournaments</p><ul class="plist">'
+      +gone.map(function(r){
+        return '<li class="out"><span>'+esc(r.name)+'<small>'+esc(fmtDate(r.date))+'</small></span>'
+          +'<button type="button" class="btn small" data-act="rec-restore" data-id="'+r.id+'">Restore</button></li>';
+      }).join("")+'</ul>';
+  }
+  return html+'<button type="button" class="btn small" data-act="pin-out">Sign out on this device</button>';
+}
 function backupButtons(){
   if(hasHost)return'<p class="hint">History and saved players are kept in this browser on this device.</p>';
   var online=cloud.fb&&cloud.live;
@@ -1268,6 +1358,8 @@ function shareText(rec){
   });
   lines.push("",rec.normTo?"Adjusted = "+(rec.adjOf||"games")+" scaled to "+rec.normTo+" matches. Record is wins\u2013ties\u2013losses."
     :"Games won (wins\u2013ties\u2013losses)");
+  if(!hasHost&&typeof location!=="undefined"&&/^https?:$/.test(location.protocol))
+    lines.push("","All results and player stats: "+location.origin+location.pathname+"#history");
   return lines.join("\n");
 }
 function shareButtons(id){
@@ -1294,6 +1386,7 @@ function allNames(){
   return m;
 }
 function tryRename(old,raw,confirmed){
+  if(!isOwner())return;
   var nm=String(raw||"").trim().replace(/\s+/g," ").slice(0,24);
   if(!ui.ren)ui.ren={};
   ui.ren.val=nm;ui.ren.err="";ui.ren.merge=null;
@@ -1336,7 +1429,7 @@ function tryRename(old,raw,confirmed){
   if(tch&&cloud.canWrite)commit();else render();
 }
 function renameBox(name){
-  if(!cloud.canWrite)return"";
+  if(!cloud.canWrite||!isOwner())return"";
   var r=ui.ren;
   if(!r)return '<button type="button" class="btn small" style="margin-bottom:14px" data-act="ren-open">Rename or merge</button>';
   if(r.merge)return '<div class="notice"><p style="margin:0 0 10px">'+esc(r.merge)+' already exists. Merge '+esc(name)+' into '+esc(r.merge)+'? Their history becomes one player, and this cannot be undone.</p>'
@@ -1390,13 +1483,18 @@ function setUndo(u){
   clearTimeout(undoTimer);
   undoTimer=setTimeout(function(){ui.undo=null;softRender()},20000);
 }
-function dropHistory(id){
-  hist=hist.filter(function(r){return r.id!==id});store.set(LSH,hist);
-  if(cloud.fb){
-    store.set(LSHU,(store.get(LSHU)||[]).filter(function(i){return i!==id}));
-    cloud.histRef.doc(String(id)).delete().catch(function(){});
-  }
+function markDeleted(id,flag){
+  var done=null;
+  hist.forEach(function(r,ix){
+    if(r.id!==id)return;
+    var c=clone(r);
+    if(flag){c.deleted=true;c.deletedAt=new Date().toISOString()}else{delete c.deleted;delete c.deletedAt}
+    hist[ix]=c;done=c;
+  });
+  if(done){store.set(LSH,hist);pushRec(done)}
+  return done;
 }
+function dropHistory(id){markDeleted(id,true)}
 
 /* ---------- paste a list of names (from Reclub, WhatsApp, anywhere) ---------- */
 var STOP=/^(daftar tunggu|waitlist|waiting list|wait list|cadangan|diundang|invited|reserve|reserves)\b/i;
@@ -1672,8 +1770,9 @@ function viewSheet(){
       +'<div class="gstep"><button type="button" data-act="game" data-side="'+side+'" data-d="-1" aria-label="One game fewer for '+tn+'">−</button>'
       +'<span>Games</span><button type="button" data-act="game" data-side="'+side+'" data-d="1" aria-label="One game more for '+tn+'">+</button></div></div>';
   }
+  var fresh=s.fresh;s.fresh=false;
   return '<div class="scrim" data-act="close-sheet"></div>'
-    +'<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">'
+    +'<div class="sheet'+(fresh?" in":"")+'" role="dialog" aria-modal="true" aria-labelledby="sheet-title">'
     +'<h2 id="sheet-title">Court '+m.court+(note?'<span class="note">'+note+'</span>':'')+'</h2>'
     +(s.note?'<p class="notice" role="status">'+esc(s.note)+'</p>':'')
     +'<div class="sb">'+(flipped(m,sc)?col("b",1)+col("a",0):col("a",0)+col("b",1))+'</div>'
@@ -1816,7 +1915,13 @@ document.addEventListener("click",function(e){
     case "player-back":ui.ren=null;ui.player=null;render();window.scrollTo(0,0);break;
     case "ask-del":ui.confirmDel=Number(el.dataset.id);render();reopenDetails(ui.confirmDel);break;
     case "keep-rec":var keep=ui.confirmDel;ui.confirmDel=null;render();reopenDetails(keep);break;
+    case "pin-open":ui.pin={mode:el.dataset.m==="set"?"set":"enter",err:"",busy:false};render();var pb=$("#pin-in");if(pb&&pb.focus)pb.focus();break;
+    case "pin-cancel":ui.pin=null;render();break;
+    case "pin-go":pinSubmit();break;
+    case "pin-out":store.set(LSO,null);render();break;
+    case "rec-restore":if(isOwner()){markDeleted(Number(el.dataset.id),false);render()}break;
     case "del-rec":
+      if(!isOwner())break;
       var drec=null;hist.forEach(function(r){if(r.id===Number(el.dataset.id))drec=r});
       dropHistory(Number(el.dataset.id));ui.confirmDel=null;
       if(drec)setUndo({kind:"del",rec:clone(drec),label:"Deleted from history."});
@@ -1829,10 +1934,7 @@ document.addEventListener("click",function(e){
         T=u.T;ui.tab=T.finished?"standings":"matches";ui.round=firstOpenRound();
         if(T.sample){store.set(LS,T);render()}else commit();
       }else{
-        if(!hist.some(function(r){return r.id===u.rec.id})){
-          hist.push(u.rec);hist.sort(function(x,y){return String(x.date).localeCompare(String(y.date))});
-          store.set(LSH,hist);pushRec(u.rec);
-        }
+        markDeleted(u.rec.id,false);
         render();
       }
       window.scrollTo(0,0);break;
@@ -1912,7 +2014,7 @@ document.addEventListener("click",function(e){
       if(T&&cloud.canWrite){T.finished=false;if(T.id)dropHistory(T.id);commit()}break;
     case "score":
       if(!cloud.canWrite||T.finished)break;
-      ui.sheet={r:ui.round,m:Number(el.dataset.m)};render();refocus("close-sheet");
+      ui.sheet={r:ui.round,m:Number(el.dataset.m),fresh:true};render();refocus("close-sheet");
       break;
     case "point":case "undo":case "game":case "finish":case "reopen":
       if(ui.sheet&&T&&cloud.canWrite&&!T.finished){
@@ -2015,6 +2117,7 @@ document.addEventListener("keydown",function(e){
   if(e.key==="Enter"&&e.target.id==="late-name"){e.preventDefault();addLate(e.target.value)}
   if(e.key==="Enter"&&e.target.id==="reclub-link"){e.preventDefault();reclubGet()}
   if(e.key==="Enter"&&e.target.id==="sub-name"){e.preventDefault();doSub({name:e.target.value})}
+  if(e.key==="Enter"&&e.target.id==="pin-in"){e.preventDefault();pinSubmit()}
   if(e.key==="Enter"&&e.target.id==="ren-name"){e.preventDefault();tryRename(ui.player,e.target.value,false)}
   if(e.key==="Enter"&&e.target.id==="late-pair"){e.preventDefault();addLatePair(e.target.value)}
   if(e.key==="Escape"&&ui.sheet){ui.sheet=null;render()}
@@ -2023,6 +2126,7 @@ document.addEventListener("keydown",function(e){
 });
 
 ui.round=firstOpenRound();
+if(typeof location!=="undefined"&&location.hash==="#history")ui.tab="history";
 render();
 initCloud();
 initFirebase();
