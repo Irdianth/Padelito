@@ -212,7 +212,16 @@ input[type=text]{width:100%;height:48px;border-radius:12px;border:1.5px solid va
 .sheet h2{margin-top:0;overflow-wrap:anywhere}
 .nums{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:14px;margin-bottom:16px}
 .nums button{height:52px;border-radius:12px;border:1.5px solid var(--border);background:var(--bg);font-family:var(--display);font-weight:600;font-size:24px}
-.nums button[aria-pressed="true"]{background:var(--court);border-color:var(--court);color:#fff}
+.nums button[aria-pressed="true"]{background:var(--btn-bg);border-color:var(--btn-bg);color:var(--btn-fg)}
+.gbtn{display:block;width:100%;min-height:124px;border-radius:18px;border:2px solid var(--border);background:var(--bg);color:var(--ink);font-family:var(--display);font-weight:700;font-size:96px;line-height:1;font-variant-numeric:tabular-nums;margin:6px 0 4px;padding:0}
+.gbtn[aria-pressed="true"]{border-color:var(--gold);color:var(--accent)}
+.gpanel{border-top:1px solid var(--border);padding-top:14px;margin-bottom:16px}
+.gpanel h3{font-size:16px;font-weight:600;margin:0 0 4px;overflow-wrap:anywhere}
+.gpanel .nums{margin-top:8px;margin-bottom:12px}
+.confirm{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px;text-align:center;font-weight:600;margin:0 0 12px;overflow-wrap:anywhere}
+.confirm b{font-family:var(--display);font-weight:700;font-size:48px;line-height:1;white-space:nowrap}
+.ptsgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:center;margin-bottom:10px}
+.ptsgrid p{margin:0 0 6px;font-family:var(--display);font-weight:600;font-size:26px;color:var(--accent)}
 @keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion:reduce){.sheet.in{animation:none}}
 @media (max-width:360px){.score{font-size:50px;min-width:54px}.names span{font-size:15px;padding:0 8px}}
@@ -1096,11 +1105,6 @@ function viewTournament(){
     +'<button type="button" data-act="t-norm" data-v="0" aria-pressed="'+(T.norm===false)+'">Leave as played</button></div>'
     +'<p class="hint">'+(T.norm!==false?"Totals are scaled to the same number of matches, so someone who sat out more is not behind for it. Early leavers and people with far fewer matches are not scaled."
       :"Totals are counted exactly as played.")+'</p></fieldset>';
-  html+='<fieldset class="field" style="margin:0 0 18px"><legend>Changing ends on the scoreboard</legend><div class="seg">'
-    +'<button type="button" data-act="t-auto" data-v="1" aria-pressed="'+(T.autoSides!==false)+'">Automatic</button>'
-    +'<button type="button" data-act="t-auto" data-v="0" aria-pressed="'+(T.autoSides===false)+'">Manual</button></div>'
-    +'<p class="hint">'+(T.autoSides!==false?"The pairs swap left and right after games 1, 3, 5 and so on. Switch sides on a scoreboard still works if they started the other way round."
-      :"The pairs only swap when you tap Switch sides.")+'</p></fieldset>';
   html+='<p class="hint" style="margin-bottom:18px">'+(cloud.live
     ?"Scores are saved and update live for anyone you share this page with."
     :"Scores are saved in this browser on this device.")+'</p>';
@@ -1668,12 +1672,8 @@ function viewPaste(){
   return html+'</div>';
 }
 
-/* pairs change ends after games 1, 3, 5...; the Switch sides button sets which way round they started */
-function flipped(m,sc){
-  var changes=Math.ceil((sc.ga+sc.gb)/2)+(sc.tb?Math.floor((sc.pa+sc.pb)/6):0);
-  var auto=T.autoSides!==false&&changes%2===1;
-  return !!m.flip!==auto;
-}
+/* which pair is shown on the left: only the Switch sides button changes it */
+function flipped(m){return !!m.flip}
 function playerById(id){var f=null;T.players.forEach(function(p){if(p.id===id)f=p});return f}
 function viewSub(s,r,m){
   var fixed=isFixed(T),html='<div class="scrim" data-act="close-sheet"></div><div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">';
@@ -1754,35 +1754,89 @@ function doSub(who){
   s.sub=null;
   commit();
 }
+/* entering a final score: the most games one pair can have, and what the other pair must have (null = more than one answer) */
+function gameMax(t){var r=ml(t);return r.mode==="set"?7:r.mode==="best"?Math.floor(r.n/2)+1:r.n}
+function otherGames(t,v){
+  var r=ml(t),n=r.n;
+  if(r.mode==="total")return n-v;
+  if(r.mode==="set")return v<=4?6:v===5?7:null;
+  if(r.mode==="best"){
+    var need=Math.floor(n/2)+1;
+    if(v>=need)return null;
+    return n%2===0&&v===n/2?v:need;
+  }
+  return v<n?n:null;
+}
 function viewSheet(){
   var s=ui.sheet;if(!s||!T)return"";
   var r=T.rounds[s.r],m=r&&r.matches[s.m];if(!m)return"";
   if(s.sub)return viewSub(s,r,m);
-  var sc=score(m,T);
-  var note=sc.over?"Match finished":sc.tb?(T.autoSides!==false&&sc.pa+sc.pb>0&&(sc.pa+sc.pb)%6===0?"Tiebreak, change ends":"Tiebreak"):sc.deuce?(T.deuce==="golden"?"Golden point":"Deuce")
-    :(T.autoSides!==false&&(sc.ga+sc.gb)%2===1&&sc.pa+sc.pb===0)?"Change ends":"";
-  function col(side,i){
-    var tn=esc(teamName(m[side]));
+  var sc=score(m,T),canEdit=cloud.canWrite&&!T.finished;
+  var note=sc.over?"Match finished":sc.tb?"Tiebreak":sc.deuce?(T.deuce==="golden"?"Golden point":"Deuce"):"";
+  var order=flipped(m)?["b","a"]:["a","b"],ix=function(side){return side==="a"?0:1};
+  var nameOfSide=function(side){return esc(teamName(m[side]))};
+  function col(side){
+    var g=ix(side)?sc.gb:sc.ga,tn=nameOfSide(side);
     return '<div class="sb-col"><p class="sb-name">'+tn+'</p>'
-      +'<p class="sb-g">'+(i?sc.gb:sc.ga)+'</p><p class="sb-cap">games won in this match</p>'
-      +'<p class="sb-p" style="margin-bottom:0">'+(sc.over?"&nbsp;":sc.labels[i])+'</p><p class="sb-cap" style="margin-bottom:10px">'+(sc.over?"&nbsp;":sc.tb?"tiebreak points":"points in this game")+'</p>'
-      +'<button type="button" class="btn primary block" data-act="point" data-side="'+side+'"'+(sc.over?" disabled":"")+' aria-label="Point for '+tn+'">Point</button>'
-      +'<div class="gstep"><button type="button" data-act="game" data-side="'+side+'" data-d="-1" aria-label="One game fewer for '+tn+'">−</button>'
-      +'<span>Games</span><button type="button" data-act="game" data-side="'+side+'" data-d="1" aria-label="One game more for '+tn+'">+</button></div></div>';
+      +(canEdit?'<button type="button" class="gbtn" data-act="g-open" data-side="'+side+'" aria-pressed="'+(!!(s.pick&&s.pick.side===side))+'" aria-label="'+tn+', '+g+' games. Enter games">'+g+'</button>'
+               :'<p class="sb-g">'+g+'</p>')
+      +'<p class="sb-cap">games won</p></div>';
+  }
+  function numRow(act,side,cur){
+    var h='<div class="nums">';
+    for(var v=0;v<=gameMax(T);v++)h+='<button type="button" data-act="'+act+'" data-side="'+side+'" data-v="'+v+'" aria-pressed="'+(cur===v)+'">'+v+'</button>';
+    return h+'</div>';
+  }
+  var panel="",busy=!!(s.pick||s.prop);
+  if(canEdit&&s.pick){
+    var mode=ml(T).mode;
+    panel='<div class="gpanel"><h3>Games for '+nameOfSide(s.pick.side)+'</h3>'
+      +(mode==="first"||mode==="best"||mode==="set"?'<p class="hint" style="margin:0">Pick the losing pair for a one-tap entry.</p>':'')
+      +numRow("g-pick",s.pick.side,null)
+      +'<div class="row"><button type="button" class="btn" data-act="g-cancel">Cancel</button></div></div>';
+  }else if(canEdit&&s.prop){
+    var pa=s.prop.a,pb=s.prop.b,both=pa!=null&&pb!=null,val=function(side){return side==="a"?pa:pb};
+    var short=both&&pa+pb>0&&!gamesOver(T,pa,pb);
+    panel='<div class="gpanel">';
+    if(!s.prop.edit){
+      panel+='<p class="confirm"><span>'+nameOfSide(order[0])+'</span><b>'+val(order[0])+' – '+val(order[1])+'</b><span>'+nameOfSide(order[1])+'</span></p>';
+    }else{
+      order.forEach(function(side){panel+='<h3>'+nameOfSide(side)+'</h3>'+numRow("g-set",side,val(side))});
+    }
+    panel+=(short?'<p class="hint" style="margin:0 0 12px">This is shorter than a full match. Confirming saves it as it is.</p>':'')
+      +'<div class="row"><button type="button" class="btn primary" data-act="g-confirm"'+(both&&pa+pb>0?"":" disabled")+'>Confirm score</button>'
+      +(s.prop.edit?'':'<button type="button" class="btn" data-act="g-edit">Edit</button>')
+      +'<button type="button" class="btn" data-act="g-cancel">Cancel</button>'
+      +(s.prop.edit&&sc.started?'<button type="button" class="btn danger" data-act="g-clear">Clear score</button>':'')
+      +'</div></div>';
+  }else if(canEdit){
+    panel='<p class="hint" style="margin-top:0;margin-bottom:14px">Tap a number to enter the games. The other pair is filled in for you where the result allows only one answer.</p>';
+  }
+  var pts="";
+  if(canEdit&&!busy){
+    var open=s.pts||!!m.log;
+    if(!open)pts='<button type="button" class="back" style="margin-top:0;margin-bottom:8px" data-act="pts-toggle">Score point by point</button>';
+    else{
+      pts='<div class="gpanel"><h3 style="margin-bottom:10px">Point by point'+(sc.tb?", tiebreak":"")+'</h3>';
+      if(sc.over)pts+='<p class="hint" style="margin:0 0 12px">This match is finished.'+(m.ended&&!gamesOver(T,sc.ga,sc.gb)?'':' Tap a games number above to change the result.')+'</p>'
+        +(m.ended&&!gamesOver(T,sc.ga,sc.gb)?'<div class="row"><button type="button" class="btn" data-act="reopen">Reopen match</button></div>':'');
+      else pts+='<div class="ptsgrid">'+order.map(function(side){
+          return '<div><p>'+sc.labels[ix(side)]+'</p><button type="button" class="btn block" data-act="point" data-side="'+side+'" aria-label="Point for '+nameOfSide(side)+'">Point</button></div>';
+        }).join("")+'</div><div class="row"><button type="button" class="btn small" data-act="undo"'+(m.log?"":" disabled")+'>Undo last point</button>'
+        +(m.log?'':'<button type="button" class="btn small" data-act="pts-toggle">Hide</button>')+'</div>';
+      pts+='</div>';
+    }
   }
   var fresh=s.fresh;s.fresh=false;
   return '<div class="scrim" data-act="close-sheet"></div>'
     +'<div class="sheet'+(fresh?" in":"")+'" role="dialog" aria-modal="true" aria-labelledby="sheet-title">'
     +'<h2 id="sheet-title">Court '+m.court+(note?'<span class="note">'+note+'</span>':'')+'</h2>'
     +(s.note?'<p class="notice" role="status">'+esc(s.note)+'</p>':'')
-    +'<div class="sb">'+(flipped(m,sc)?col("b",1)+col("a",0):col("a",0)+col("b",1))+'</div>'
-    +'<p class="hint" style="margin-top:0;margin-bottom:14px">Not tracking every point? Set the games with − and +. That restarts the current game.</p>'
+    +'<div class="sb">'+col(order[0])+col(order[1])+'</div>'
+    +panel+pts
     +'<div class="row">'
-    +'<button type="button" class="btn" data-act="undo"'+(m.log&&!m.ended?"":" disabled")+'>Undo last point</button>'
-    +(m.ended?'<button type="button" class="btn" data-act="reopen">Reopen match</button>'
-      :sc.over?'':'<button type="button" class="btn" data-act="finish">Finish match now</button>')
-    +(cloud.canWrite&&!T.finished?'<button type="button" class="btn" data-act="flip">Switch sides</button>':'')
-    +(cloud.canWrite&&!sc.over&&!T.finished?'<button type="button" class="btn" data-act="sub-open">Swap a player</button>':'')
+    +(canEdit&&!busy?'<button type="button" class="btn" data-act="flip">Switch sides</button>':'')
+    +(canEdit&&!busy&&!sc.over?'<button type="button" class="btn" data-act="sub-open">Swap a player</button>':'')
     +'<button type="button" class="btn primary" data-act="close-sheet">Done</button></div></div>';
 }
 
@@ -2016,6 +2070,26 @@ document.addEventListener("click",function(e){
       if(!cloud.canWrite||T.finished)break;
       ui.sheet={r:ui.round,m:Number(el.dataset.m),fresh:true};render();refocus("close-sheet");
       break;
+    case "g-open":case "g-pick":case "g-edit":case "g-set":case "g-cancel":case "g-confirm":case "g-clear":case "pts-toggle":
+      if(ui.sheet&&T&&cloud.canWrite&&!T.finished){
+        var gs=ui.sheet,gm=T.rounds[gs.r].matches[gs.m],gside=el.dataset.side,gv=Number(el.dataset.v);
+        if(!gm)break;
+        if(act==="pts-toggle"){gs.pts=!gs.pts;render();break}
+        if(act==="g-open"){gs.prop=null;gs.pick=gs.pick&&gs.pick.side===gside?null:{side:gside};gs.note="";render();break}
+        if(act==="g-cancel"){gs.pick=null;gs.prop=null;render();break}
+        if(act==="g-pick"&&gs.pick){
+          var oth=otherGames(T,gv),pr={a:null,b:null,edit:oth==null};
+          pr[gs.pick.side]=gv;pr[gs.pick.side==="a"?"b":"a"]=oth;
+          gs.prop=pr;gs.pick=null;render();break;
+        }
+        if(act==="g-edit"&&gs.prop){gs.prop.edit=true;render();break}
+        if(act==="g-set"&&gs.prop){gs.prop[gside==="b"?"b":"a"]=gv;render();break}
+        if(act==="g-clear"){gm.base=[0,0];gm.log="";gm.ended=false;gs.prop=null;gs.pick=null;commit();break}
+        if(act==="g-confirm"&&gs.prop&&gs.prop.a!=null&&gs.prop.b!=null&&gs.prop.a+gs.prop.b>0){
+          gm.base=[gs.prop.a,gs.prop.b];gm.log="";gm.ended=true;
+          gs.prop=null;gs.pick=null;commit();
+        }
+      }break;
     case "point":case "undo":case "game":case "finish":case "reopen":
       if(ui.sheet&&T&&cloud.canWrite&&!T.finished){
         var m=T.rounds[ui.sheet.r].matches[ui.sheet.m],sc=score(m,T),side=el.dataset.side;
@@ -2050,7 +2124,6 @@ document.addEventListener("click",function(e){
     case "sub-in-new":var sbn=$("#sub-name");doSub({name:sbn?sbn.value:""});break;
     case "t-norm":
       if(T&&cloud.canWrite){T.norm=el.dataset.v==="1";if(T.finished)recordHistory();commit()}break;
-    case "t-auto":if(T&&cloud.canWrite){T.autoSides=el.dataset.v==="1";commit()}break;
     case "t-rank":
       if(T&&cloud.canWrite){
         T.rank=el.dataset.v==="wins"?"wins":"games";
